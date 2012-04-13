@@ -67,7 +67,8 @@ module ActiveRecord::Associations
 
       proxy_reflection.klass.start_importing do
         proxy_owner.transaction do
-          assoc_record = proxy_reflection.klass.import_from_hash(record_hash.merge(primary_key_hash))
+          record_hash.merge!(primary_key_hash)
+          assoc_record = proxy_reflection.klass.import_from_hash(record_hash)
           replace(assoc_record)
         end
       end
@@ -92,10 +93,12 @@ module ActiveRecord::Associations
 
       proxy_reflection.klass.start_importing do
         proxy_owner.transaction do
+          delete_all
           assoc_records = record_hashes.map do |record_hash|
-            proxy_reflection.klass.import_from_hash(record_hash.merge(primary_key_hash))
+            record_hash.merge!(primary_key_hash)
+            proxy_reflection.klass.import_from_hash(record_hash)
           end
-          concat(*assoc_records)
+          replace(assoc_records)
         end
       end
     end

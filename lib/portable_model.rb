@@ -77,7 +77,7 @@ module PortableModel
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
 
       # Override any necessary attributes before importing.
-      record_hash = record_hash.merge(overridden_imported_attrs)
+      record_hash.merge!(overridden_imported_attrs)
 
       if (columns_hash.include?(inheritance_column) &&
           (record_type_name = record_hash[inheritance_column.to_s]) &&
@@ -103,12 +103,17 @@ module PortableModel
 
               # Create a new record.
               record = create!(record_hash)
+              puts "Created #{record.class.name} #{record.id}"
 
               # Import each of the record's associations into the record.
               assoc_attrs.each do |assoc_name, assoc_value|
                 record.import_into_association(assoc_name, assoc_value)
               end
             end
+
+            imported_records[record_hash.object_id] = record
+          else
+            puts "Using #{record.class.name} #{record.id}"
           end
 
           record
