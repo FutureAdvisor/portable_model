@@ -103,7 +103,6 @@ module PortableModel
 
               # Create a new record.
               record = create!(record_hash)
-              puts "Created #{record.class.name} #{record.id}"
 
               # Import each of the record's associations into the record.
               assoc_attrs.each do |assoc_name, assoc_value|
@@ -112,8 +111,6 @@ module PortableModel
             end
 
             imported_records[record_hash.object_id] = record
-          else
-            puts "Using #{record.class.name} #{record.id}"
           end
 
           record
