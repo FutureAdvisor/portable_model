@@ -143,7 +143,14 @@ module PortableModel
     def portable_attributes
       columns.reject do |column|
         # TODO: Consider rejecting counter_cache columns as well; this will involve retrieving a has_many association's corresponding belongs_to association to retrieve its counter_cache_column.
-        column.primary || column.name.in?(reflect_on_all_associations(:belongs_to).map(&:association_foreign_key))
+        (
+          column.primary ||
+          column.name.in?(excluded_export_attrs) ||
+          (
+            column.name.in?(reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)) &&
+            !column.name.in?(included_association_keys)
+          )
+        )
       end.map(&:name).map(&:to_s)
     end
 
@@ -164,6 +171,23 @@ module PortableModel
 
   protected
 
+    # Excludes the specified attributes whenever a record is exported.
+    #
+    def exclude_attributes_on_export(*attrs)
+      excluded_export_attrs.merge(attrs.map(&:to_s))
+    end
+
+    # Includes the specified associations' foreign keys (which are normally
+    # excluded by default) whenever a record is exported.
+    #
+    def include_association_keys_on_export(*associations)
+      associations.inject(included_association_keys) do |included_keys, assoc|
+        assoc_reflection = reflect_on_association(assoc)
+        raise ArgumentError.new('can only include foreign keys of belongs_to associations') unless assoc_reflection.macro == :belongs_to
+        included_keys << assoc_reflection.association_foreign_key
+      end
+    end
+
     # Overrides the specified attributes whenever a record is imported.
     #
     def override_attributes_on_import(attrs)
@@ -174,6 +198,14 @@ module PortableModel
     end
 
   private
+
+    def excluded_export_attrs
+      @excluded_export_attrs ||= Set.new
+    end
+
+    def included_association_keys
+      @included_association_keys ||= Set.new
+    end
 
     def overridden_imported_attrs
       @overridden_imported_attrs ||= {}
