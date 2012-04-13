@@ -13,20 +13,36 @@ module PortableModel
   # Export the record to a hash.
   #
   def export_to_hash
-    # Export portable attributes.
-    record_hash = self.class.portable_attributes.inject({}) do |hash, attr_name|
-      hash[attr_name] = attributes[attr_name]
-      hash
-    end
+    self.class.start_exporting do |exported_records|
+      # If the record had already been exported during the current session, use
+      # the result of that previous export.
+      record_id = "#{self.class.table_name}_#{id}"
+      record_hash = exported_records[record_id]
 
-    # Include the exported attributes of portable associations.
-    self.class.portable_associations.inject(record_hash) do |hash, assoc_name|
-      assoc = self.__send__(assoc_name)
-      hash[assoc_name] = assoc.export_portable_association if assoc
-      hash
-    end
+      unless record_hash
+        # Export portable attributes.
+        record_hash = self.class.portable_attributes.inject({}) do |hash, attr_name|
+          hash[attr_name] = if self.class.overridden_export_attrs.has_key?(attr_name)
+                              overridden_value = self.class.overridden_export_attrs[attr_name]
+                              overridden_value.is_a?(Proc) ? instance_eval(&overridden_value) : overridden_value
+                            else
+                              attributes[attr_name]
+                            end
+          hash
+        end
 
-    record_hash
+        # Include the exported attributes of portable associations.
+        self.class.portable_associations.inject(record_hash) do |hash, assoc_name|
+          assoc = self.__send__(assoc_name)
+          hash[assoc_name] = assoc.export_portable_association if assoc
+          hash
+        end
+
+        exported_records[record_id] = record_hash
+      end
+
+      record_hash
+    end
   end
 
   # Export the record to a YAML file.
@@ -66,34 +82,44 @@ module PortableModel
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
 
       # Override any necessary attributes before importing.
-      record_hash = record_hash.merge(overridden_imported_attrs)
+      record_hash.merge!(overridden_import_attrs)
 
-      transaction do
-        if (columns_hash.include?(inheritance_column) &&
-            (record_type_name = record_hash[inheritance_column.to_s]) &&
-            !record_type_name.blank? &&
-            record_type_name != sti_name)
-          # The model implements STI and the record type points to a different
-          # class; call the method in that class instead.
-          return compute_type(record_type_name).import_from_hash(record_hash)
+      if (columns_hash.include?(inheritance_column) &&
+          (record_type_name = record_hash[inheritance_column.to_s]) &&
+          !record_type_name.blank? &&
+          record_type_name != sti_name)
+        # The model implements STI and the record type points to a different
+        # class; call the method in that class instead.
+        compute_type(record_type_name).import_from_hash(record_hash)
+      else
+        start_importing do |imported_records|
+          # If the hash had already been imported during the current session,
+          # use the result of that previous import.
+          record = imported_records[record_hash.object_id]
+
+          unless record
+            transaction do
+              # First split out the attributes that correspond to portable
+              # associations.
+              assoc_attrs = portable_associations.inject({}) do |hash, assoc_name|
+                hash[assoc_name] = record_hash.delete(assoc_name) if record_hash.has_key?(assoc_name)
+                hash
+              end
+
+              # Create a new record.
+              record = create!(record_hash)
+
+              # Import each of the record's associations into the record.
+              assoc_attrs.each do |assoc_name, assoc_value|
+                record.import_into_association(assoc_name, assoc_value)
+              end
+            end
+
+            imported_records[record_hash.object_id] = record
+          end
+
+          record
         end
-
-        # First split out the attributes that correspond to portable
-        # associations.
-        assoc_attrs = portable_associations.inject({}) do |hash, assoc_name|
-          hash[assoc_name] = record_hash.delete(assoc_name) if record_hash.has_key?(assoc_name)
-          hash
-        end
-
-        # Create a new record.
-        record = create!(record_hash)
-
-        # Import each of the record's associations into the record.
-        assoc_attrs.each do |assoc_name, assoc_value|
-          record.import_into_association(assoc_name, assoc_value)
-        end
-
-        record
       end
     end
 
@@ -104,13 +130,34 @@ module PortableModel
       import_from_hash(record_hash.merge(additional_attrs))
     end
 
+    # Starts an export session and yields a hash of currently exported records
+    # in the session to the specified block.
+    #
+    def start_exporting(&block)
+      start_porting(:exported_records, &block)
+    end
+
+    # Starts an import session and yields a hash of currently imported records
+    # in the session to the specified block.
+    #
+    def start_importing(&block)
+      start_porting(:imported_records, &block)
+    end
+
     # Returns the names of portable attributes, which are any attributes that
     # are not primary or foreign keys.
     #
     def portable_attributes
       columns.reject do |column|
         # TODO: Consider rejecting counter_cache columns as well; this will involve retrieving a has_many association's corresponding belongs_to association to retrieve its counter_cache_column.
-        column.primary || column.name.in?(reflect_on_all_associations(:belongs_to).map(&:association_foreign_key))
+        (
+          column.primary ||
+          column.name.in?(excluded_export_attrs) && !overridden_export_attrs.has_key?(column.name) ||
+          (
+            column.name.in?(reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)) &&
+            !column.name.in?(included_association_keys)
+          )
+        )
       end.map(&:name).map(&:to_s)
     end
 
@@ -129,12 +176,55 @@ module PortableModel
       end.map(&:name).map(&:to_s)
     end
 
+    def included_association_keys
+      @included_association_keys ||= Set.new
+    end
+
+    def excluded_export_attrs
+      @excluded_export_attrs ||= Set.new
+    end
+
+    def overridden_export_attrs
+      @overridden_export_attrs ||= {}
+    end
+
+    def overridden_import_attrs
+      @overridden_import_attrs ||= {}
+    end
+
   protected
+
+    # Includes the specified associations' foreign keys (which are normally
+    # excluded by default) whenever a record is exported.
+    #
+    def include_association_keys_on_export(*associations)
+      associations.inject(included_association_keys) do |included_keys, assoc|
+        assoc_reflection = reflect_on_association(assoc)
+        raise ArgumentError.new('can only include foreign keys of belongs_to associations') unless assoc_reflection.macro == :belongs_to
+        included_keys << assoc_reflection.association_foreign_key
+      end
+    end
+
+    # Excludes the specified attributes whenever a record is exported.
+    #
+    def exclude_attributes_on_export(*attrs)
+      excluded_export_attrs.merge(attrs.map(&:to_s))
+    end
+
+    # Overrides the specified attributes whenever a record is exported.
+    # Specified values can be procedures that dynamically generate the value.
+    #
+    def override_attributes_on_export(attrs)
+      attrs.inject(overridden_export_attrs) do |overridden_attrs, (attr_name, attr_value)|
+        overridden_attrs[attr_name.to_s] = attr_value
+        overridden_attrs
+      end
+    end
 
     # Overrides the specified attributes whenever a record is imported.
     #
     def override_attributes_on_import(attrs)
-      attrs.inject(overridden_imported_attrs) do |overridden_attrs, (attr_name, attr_value)|
+      attrs.inject(overridden_import_attrs) do |overridden_attrs, (attr_name, attr_value)|
         overridden_attrs[attr_name.to_s] = attr_value
         overridden_attrs
       end
@@ -142,8 +232,19 @@ module PortableModel
 
   private
 
-    def overridden_imported_attrs
-      @overridden_imported_attrs ||= {}
+    def start_porting(storage_identifier)
+      # Use thread-local storage to keep track of records that have been
+      # ported in the current session. This way, records that are encountered
+      # multiple times are represented using the same resulting object.
+      is_new_session = Thread.current[storage_identifier].nil?
+      Thread.current[storage_identifier] = {} if is_new_session
+
+      begin
+        # Yield the hash of records in the current session to the specified block.
+        yield(Thread.current[storage_identifier])
+      ensure
+        Thread.current[storage_identifier] = nil if is_new_session
+      end
     end
 
   end
