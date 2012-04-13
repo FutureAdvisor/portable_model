@@ -22,7 +22,12 @@ module PortableModel
       unless record_hash
         # Export portable attributes.
         record_hash = self.class.portable_attributes.inject({}) do |hash, attr_name|
-          hash[attr_name] = attributes[attr_name]
+          hash[attr_name] = if self.class.overridden_export_attrs.has_key?(attr_name)
+                              overridden_value = self.class.overridden_export_attrs[attr_name]
+                              overridden_value.is_a?(Proc) ? instance_eval(&overridden_value) : overridden_value
+                            else
+                              attributes[attr_name]
+                            end
           hash
         end
 
@@ -77,7 +82,7 @@ module PortableModel
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
 
       # Override any necessary attributes before importing.
-      record_hash.merge!(overridden_imported_attrs)
+      record_hash.merge!(overridden_import_attrs)
 
       if (columns_hash.include?(inheritance_column) &&
           (record_type_name = record_hash[inheritance_column.to_s]) &&
@@ -147,7 +152,7 @@ module PortableModel
         # TODO: Consider rejecting counter_cache columns as well; this will involve retrieving a has_many association's corresponding belongs_to association to retrieve its counter_cache_column.
         (
           column.primary ||
-          column.name.in?(excluded_export_attrs) ||
+          column.name.in?(excluded_export_attrs) && !overridden_export_attrs.has_key?(column.name) ||
           (
             column.name.in?(reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)) &&
             !column.name.in?(included_association_keys)
@@ -171,13 +176,23 @@ module PortableModel
       end.map(&:name).map(&:to_s)
     end
 
-  protected
-
-    # Excludes the specified attributes whenever a record is exported.
-    #
-    def exclude_attributes_on_export(*attrs)
-      excluded_export_attrs.merge(attrs.map(&:to_s))
+    def included_association_keys
+      @included_association_keys ||= Set.new
     end
+
+    def excluded_export_attrs
+      @excluded_export_attrs ||= Set.new
+    end
+
+    def overridden_export_attrs
+      @overridden_export_attrs ||= {}
+    end
+
+    def overridden_import_attrs
+      @overridden_import_attrs ||= {}
+    end
+
+  protected
 
     # Includes the specified associations' foreign keys (which are normally
     # excluded by default) whenever a record is exported.
@@ -190,28 +205,32 @@ module PortableModel
       end
     end
 
+    # Excludes the specified attributes whenever a record is exported.
+    #
+    def exclude_attributes_on_export(*attrs)
+      excluded_export_attrs.merge(attrs.map(&:to_s))
+    end
+
+    # Overrides the specified attributes whenever a record is exported.
+    # Specified values can be procedures that dynamically generate the value.
+    #
+    def override_attributes_on_export(attrs)
+      attrs.inject(overridden_export_attrs) do |overridden_attrs, (attr_name, attr_value)|
+        overridden_attrs[attr_name.to_s] = attr_value
+        overridden_attrs
+      end
+    end
+
     # Overrides the specified attributes whenever a record is imported.
     #
     def override_attributes_on_import(attrs)
-      attrs.inject(overridden_imported_attrs) do |overridden_attrs, (attr_name, attr_value)|
+      attrs.inject(overridden_import_attrs) do |overridden_attrs, (attr_name, attr_value)|
         overridden_attrs[attr_name.to_s] = attr_value
         overridden_attrs
       end
     end
 
   private
-
-    def excluded_export_attrs
-      @excluded_export_attrs ||= Set.new
-    end
-
-    def included_association_keys
-      @included_association_keys ||= Set.new
-    end
-
-    def overridden_imported_attrs
-      @overridden_imported_attrs ||= {}
-    end
 
     def start_porting(storage_identifier)
       # Use thread-local storage to keep track of records that have been
