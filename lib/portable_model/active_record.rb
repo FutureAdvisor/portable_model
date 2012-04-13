@@ -55,7 +55,7 @@ module ActiveRecord::Associations
     #
     def export_portable_association
       NotPortableError.raise_on_not_portable(self)
-      export_to_hash
+      proxy_reflection.klass.start_exporting { export_to_hash }
     end
 
     # Import the association from a hash.
@@ -63,13 +63,12 @@ module ActiveRecord::Associations
     def import_portable_association(record_hash)
       NotPortableError.raise_on_not_portable(self)
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
+      raise 'cannot replace existing association record' unless target.nil?
 
-      proxy_owner.transaction do
-        if target.nil?
+      proxy_reflection.klass.start_importing do
+        proxy_owner.transaction do
           assoc_record = proxy_reflection.klass.import_from_hash(record_hash.merge(primary_key_hash))
           replace(assoc_record)
-        else
-          raise 'cannot replace existing association record'
         end
       end
     end
@@ -82,7 +81,7 @@ module ActiveRecord::Associations
     #
     def export_portable_association
       NotPortableError.raise_on_not_portable(self)
-      map(&:export_to_hash)
+      proxy_reflection.klass.start_exporting { map(&:export_to_hash) }
     end
 
     # Import the association from an array of hashes.
@@ -91,9 +90,13 @@ module ActiveRecord::Associations
       NotPortableError.raise_on_not_portable(self)
       raise ArgumentError.new('specified argument is not an array of hashes') unless record_hashes.is_a?(Array) && record_hashes.all? { |record_hash| record_hash.is_a?(Hash) }
 
-      proxy_owner.transaction do
-        assoc_records = record_hashes.map { |record_hash| proxy_reflection.klass.import_from_hash(record_hash.merge(primary_key_hash)) }
-        concat(*assoc_records)
+      proxy_reflection.klass.start_importing do
+        proxy_owner.transaction do
+          assoc_records = record_hashes.map do |record_hash|
+            proxy_reflection.klass.import_from_hash(record_hash.merge(primary_key_hash))
+          end
+          concat(*assoc_records)
+        end
       end
     end
 

@@ -13,20 +13,31 @@ module PortableModel
   # Export the record to a hash.
   #
   def export_to_hash
-    # Export portable attributes.
-    record_hash = self.class.portable_attributes.inject({}) do |hash, attr_name|
-      hash[attr_name] = attributes[attr_name]
-      hash
-    end
+    self.class.start_exporting do |exported_records|
+      # If the record had already been exported during the current session, use
+      # the result of that previous export.
+      record_id = "#{self.class.table_name}_#{id}"
+      record_hash = exported_records[record_id]
 
-    # Include the exported attributes of portable associations.
-    self.class.portable_associations.inject(record_hash) do |hash, assoc_name|
-      assoc = self.__send__(assoc_name)
-      hash[assoc_name] = assoc.export_portable_association if assoc
-      hash
-    end
+      unless record_hash
+        # Export portable attributes.
+        record_hash = self.class.portable_attributes.inject({}) do |hash, attr_name|
+          hash[attr_name] = attributes[attr_name]
+          hash
+        end
 
-    record_hash
+        # Include the exported attributes of portable associations.
+        self.class.portable_associations.inject(record_hash) do |hash, assoc_name|
+          assoc = self.__send__(assoc_name)
+          hash[assoc_name] = assoc.export_portable_association if assoc
+          hash
+        end
+
+        exported_records[record_id] = record_hash
+      end
+
+      record_hash
+    end
   end
 
   # Export the record to a YAML file.
@@ -68,32 +79,40 @@ module PortableModel
       # Override any necessary attributes before importing.
       record_hash = record_hash.merge(overridden_imported_attrs)
 
-      transaction do
-        if (columns_hash.include?(inheritance_column) &&
-            (record_type_name = record_hash[inheritance_column.to_s]) &&
-            !record_type_name.blank? &&
-            record_type_name != sti_name)
-          # The model implements STI and the record type points to a different
-          # class; call the method in that class instead.
-          return compute_type(record_type_name).import_from_hash(record_hash)
+      if (columns_hash.include?(inheritance_column) &&
+          (record_type_name = record_hash[inheritance_column.to_s]) &&
+          !record_type_name.blank? &&
+          record_type_name != sti_name)
+        # The model implements STI and the record type points to a different
+        # class; call the method in that class instead.
+        compute_type(record_type_name).import_from_hash(record_hash)
+      else
+        start_importing do |imported_records|
+          # If the hash had already been imported during the current session,
+          # use the result of that previous import.
+          record = imported_records[record_hash.object_id]
+
+          unless record
+            transaction do
+              # First split out the attributes that correspond to portable
+              # associations.
+              assoc_attrs = portable_associations.inject({}) do |hash, assoc_name|
+                hash[assoc_name] = record_hash.delete(assoc_name) if record_hash.has_key?(assoc_name)
+                hash
+              end
+
+              # Create a new record.
+              record = create!(record_hash)
+
+              # Import each of the record's associations into the record.
+              assoc_attrs.each do |assoc_name, assoc_value|
+                record.import_into_association(assoc_name, assoc_value)
+              end
+            end
+          end
+
+          record
         end
-
-        # First split out the attributes that correspond to portable
-        # associations.
-        assoc_attrs = portable_associations.inject({}) do |hash, assoc_name|
-          hash[assoc_name] = record_hash.delete(assoc_name) if record_hash.has_key?(assoc_name)
-          hash
-        end
-
-        # Create a new record.
-        record = create!(record_hash)
-
-        # Import each of the record's associations into the record.
-        assoc_attrs.each do |assoc_name, assoc_value|
-          record.import_into_association(assoc_name, assoc_value)
-        end
-
-        record
       end
     end
 
@@ -102,6 +121,20 @@ module PortableModel
     def import_from_yml(filename, additional_attrs = {})
       record_hash = YAML::load_file(filename)
       import_from_hash(record_hash.merge(additional_attrs))
+    end
+
+    # Starts an export session and yields a hash of currently exported records
+    # in the session to the specified block.
+    #
+    def start_exporting(&block)
+      start_porting(:exported_records, &block)
+    end
+
+    # Starts an import session and yields a hash of currently imported records
+    # in the session to the specified block.
+    #
+    def start_importing(&block)
+      start_porting(:imported_records, &block)
     end
 
     # Returns the names of portable attributes, which are any attributes that
@@ -144,6 +177,21 @@ module PortableModel
 
     def overridden_imported_attrs
       @overridden_imported_attrs ||= {}
+    end
+
+    def start_porting(storage_identifier)
+      # Use thread-local storage to keep track of records that have been
+      # ported in the current session. This way, records that are encountered
+      # multiple times are represented using the same resulting object.
+      is_new_session = Thread.current[storage_identifier].nil?
+      Thread.current[storage_identifier] = {} if is_new_session
+
+      begin
+        # Yield the hash of records in the current session to the specified block.
+        yield(Thread.current[storage_identifier])
+      ensure
+        Thread.current[storage_identifier] = nil if is_new_session
+      end
     end
 
   end
