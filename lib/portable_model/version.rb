@@ -1,3 +1,3 @@
 module PortableModel
-  VERSION = "0.1.0.objrefs"
+  VERSION = "1.0.0"
 end
