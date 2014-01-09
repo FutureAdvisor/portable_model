@@ -10,6 +10,12 @@ module PortableModel
     base.extend(ClassMethods)
   end
 
+  # Introduce a virtual attribute that is used to indicate whether the record
+  # is currently being imported. It can be read to skip callbacks and
+  # validations that shouldn't be run when a record is being imported.
+  #
+  attr_accessor :importing_record
+
   # Export the record to a hash.
   #
   def export_to_hash
@@ -107,7 +113,7 @@ module PortableModel
               end
 
               # Create a new record.
-              record = create!(record_hash)
+              record = create!(record_hash.merge(:importing_record => true))
 
               # Import each of the record's associations into the record.
               assoc_attrs.each do |assoc_name, assoc_value|
