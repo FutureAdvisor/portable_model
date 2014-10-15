@@ -67,10 +67,10 @@ module PortableModel
 
   # Import values into the record's association.
   #
-  def import_into_association(assoc_name, assoc_value)
+  def import_into_association(assoc_name, assoc_value, skip_validations, sort_order)
     assoc = self.__send__(assoc_name)
     if assoc
-      assoc.import_portable_association(assoc_value)
+      assoc.import_portable_association(assoc_value, skip_validations, sort_order)
     else
       assoc_reflection = self.class.reflect_on_association(assoc_name.to_sym)
       raise 'nil can only be handled for direct has_one associations' unless assoc_reflection.macro == :has_one && !assoc_reflection.is_a?(ActiveRecord::Reflection::ThroughReflection)
@@ -84,7 +84,7 @@ module PortableModel
 
     # Import a record from a hash.
     #
-    def import_from_hash(record_hash)
+    def import_from_hash(record_hash, skip_validations, sort_order)
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
 
       # Override any necessary attributes before importing.
@@ -96,7 +96,7 @@ module PortableModel
           record_type_name != sti_name)
         # The model implements STI and the record type points to a different
         # class; call the method in that class instead.
-        compute_type(record_type_name).import_from_hash(record_hash)
+        compute_type(record_type_name).import_from_hash(record_hash, skip_validations, sort_order)
       else
         start_importing do |imported_records|
           # If the hash had already been imported during the current session,
@@ -112,13 +112,19 @@ module PortableModel
                 hash
               end
 
-              # Create a new record.
-              record = create!(record_hash.merge(:importing_record => true))
+              if skip_validations
+                # Create a new record and save, skipping validations.
+                record = new(record_hash.merge(:importing_record => true))
+                record.save(false)
+              else
+                record = create(record_hash.merge(:importing_record => true))
+              end
 
               # Import each of the record's associations into the record.
-              assoc_attrs.each do |assoc_name, assoc_value|
-                record.import_into_association(assoc_name, assoc_value)
+              assoc_attrs.sort_by { |assoc_name, assoc_value| if sort_order.index(assoc_name) then sort_order.index(assoc_name) else sort_order.size end }.each do |assoc_name, assoc_value|
+                record.import_into_association(assoc_name, assoc_value, skip_validations, sort_order)
               end
+
             end
 
             imported_records[record_hash.object_id] = record
@@ -131,9 +137,10 @@ module PortableModel
 
     # Export a record from a YAML file.
     #
-    def import_from_yml(filename, additional_attrs = {})
+    def import_from_yml(filename, skip_validations = false,  sort_order = "--- []\n\n", additional_attrs = {})
       record_hash = YAML::load_file(filename)
-      import_from_hash(record_hash.merge(additional_attrs))
+      parsed_sort_order = YAML::load(sort_order)
+      import_from_hash(record_hash.merge(additional_attrs), skip_validations, parsed_sort_order)
     end
 
     # Starts an export session and yields a hash of currently exported records
