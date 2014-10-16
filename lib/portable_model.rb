@@ -91,8 +91,7 @@ module PortableModel
     # Import a record from a hash.
     #
     def import_from_hash(record_hash, options)
-      #raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
-      return unless record_hash.is_a?(Hash)
+      raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
 
       # Override any necessary attributes before importing.
       record_hash.merge!(overridden_import_attrs)
