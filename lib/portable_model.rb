@@ -40,7 +40,13 @@ module PortableModel
         # Include the exported attributes of portable associations.
         self.class.portable_associations.inject(record_hash) do |hash, assoc_name|
           assoc = self.__send__(assoc_name)
-          hash[assoc_name] = assoc.export_portable_association if assoc
+          if assoc
+             if assoc.respond_to?(:export_portable_association)
+               hash[assoc_name] = assoc.export_portable_association
+             elsif !assoc.new_record?
+               hash[assoc_name] = assoc.export_to_hash
+             end
+          end
           hash
         end
 
@@ -67,15 +73,15 @@ module PortableModel
 
   # Import values into the record's association.
   #
-  def import_into_association(assoc_name, assoc_value)
+  def import_into_association(assoc_name, assoc_value, options = {})
     assoc = self.__send__(assoc_name)
     if assoc
-      assoc.import_portable_association(assoc_value)
+      assoc.import_portable_association(assoc_value, options)
     else
       assoc_reflection = self.class.reflect_on_association(assoc_name.to_sym)
       raise 'nil can only be handled for direct has_one associations' unless assoc_reflection.macro == :has_one && !assoc_reflection.is_a?(ActiveRecord::Reflection::ThroughReflection)
       assoc = ActiveRecord::Associations::HasOneAssociation.new(self, assoc_reflection)
-      assoc.import_portable_association(assoc_value)
+      assoc.import_portable_association(assoc_value, options)
       association_instance_set(assoc_reflection.name, assoc.target.nil? ? nil : assoc)
     end
   end
@@ -84,7 +90,7 @@ module PortableModel
 
     # Import a record from a hash.
     #
-    def import_from_hash(record_hash)
+    def import_from_hash(record_hash, options = {})
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
 
       # Override any necessary attributes before importing.
@@ -96,7 +102,7 @@ module PortableModel
           record_type_name != sti_name)
         # The model implements STI and the record type points to a different
         # class; call the method in that class instead.
-        compute_type(record_type_name).import_from_hash(record_hash)
+        compute_type(record_type_name).import_from_hash(record_hash, options)
       else
         start_importing do |imported_records|
           # If the hash had already been imported during the current session,
@@ -112,13 +118,20 @@ module PortableModel
                 hash
               end
 
-              # Create a new record.
-              record = create!(record_hash.merge(:importing_record => true))
+              if options.fetch(:skip_validations, false)
+                # Create a new record and save, skipping validations.
+                record = new(record_hash.merge(:importing_record => true))
+                record.save(false)
+              else
+                record = create!(record_hash.merge(:importing_record => true))
+              end
 
               # Import each of the record's associations into the record.
+              assoc_attrs = assoc_attrs.sort_by { |assoc_name, assoc_value| order_associations.index(assoc_name) ? order_associations.index(assoc_name) : order_associations.size } unless order_associations.empty?
               assoc_attrs.each do |assoc_name, assoc_value|
-                record.import_into_association(assoc_name, assoc_value)
+                record.import_into_association(assoc_name, assoc_value, options)
               end
+
             end
 
             imported_records[record_hash.object_id] = record
@@ -131,9 +144,9 @@ module PortableModel
 
     # Export a record from a YAML file.
     #
-    def import_from_yml(filename, additional_attrs = {})
+    def import_from_yml(filename, additional_attrs = {}, options = {})
       record_hash = YAML::load_file(filename)
-      import_from_hash(record_hash.merge(additional_attrs))
+      import_from_hash(record_hash.merge(additional_attrs), options)
     end
 
     # Starts an export session and yields a hash of currently exported records
@@ -198,6 +211,10 @@ module PortableModel
       @overridden_import_attrs ||= {}
     end
 
+    def order_associations
+      @order_associations ||= []
+    end
+
   protected
 
     # Includes the specified associations' foreign keys (which are normally
@@ -234,6 +251,10 @@ module PortableModel
         overridden_attrs[attr_name.to_s] = attr_value
         overridden_attrs
       end
+    end
+
+    def order_associations_on_import(assocs)
+      order_associations.concat assocs
     end
 
   private
