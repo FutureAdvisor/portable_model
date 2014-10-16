@@ -60,7 +60,7 @@ module ActiveRecord::Associations
 
     # Import the association from a hash.
     #
-    def import_portable_association(record_hash, options)
+    def import_portable_association(record_hash, options = {})
       NotPortableError.raise_on_not_portable(self)
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
       raise 'cannot replace existing association record' unless target.nil?
@@ -82,12 +82,14 @@ module ActiveRecord::Associations
     #
     def export_portable_association
       NotPortableError.raise_on_not_portable(self)
+      puts 'proxy_reflection.klass.start_exporting'
+      puts proxy_reflection.klass.start_exporting { map{ |obj| pp obj }}
       proxy_reflection.klass.start_exporting { map(&:export_to_hash) }
     end
 
     # Import the association from an array of hashes.
     #
-    def import_portable_association(record_hashes, options)
+    def import_portable_association(record_hashes, options = {})
       NotPortableError.raise_on_not_portable(self)
       raise ArgumentError.new('specified argument is not an array of hashes') unless record_hashes.is_a?(Array) && record_hashes.all? { |record_hash| record_hash.is_a?(Hash) }
 

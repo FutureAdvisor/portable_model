@@ -73,7 +73,7 @@ module PortableModel
 
   # Import values into the record's association.
   #
-  def import_into_association(assoc_name, assoc_value, options)
+  def import_into_association(assoc_name, assoc_value, options = {})
     assoc = self.__send__(assoc_name)
     if assoc
       assoc.import_portable_association(assoc_value, options)
@@ -90,7 +90,7 @@ module PortableModel
 
     # Import a record from a hash.
     #
-    def import_from_hash(record_hash, options)
+    def import_from_hash(record_hash, options = {})
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
 
       # Override any necessary attributes before importing.
