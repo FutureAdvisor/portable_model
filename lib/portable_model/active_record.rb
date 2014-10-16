@@ -82,8 +82,6 @@ module ActiveRecord::Associations
     #
     def export_portable_association
       NotPortableError.raise_on_not_portable(self)
-      puts 'proxy_reflection.klass.start_exporting'
-      puts proxy_reflection.klass.start_exporting { map{ |obj| pp obj }}
       proxy_reflection.klass.start_exporting { map(&:export_to_hash) }
     end
 
