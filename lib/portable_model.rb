@@ -177,7 +177,7 @@ module PortableModel
             !column.name.in?(included_association_keys)
           )
         )
-      end.map(&:name).map(&:to_s)
+      end.map(&:name).map(&:to_s) | overridden_export_attrs.keys
     end
 
     # Returns names of portable associations, which are has_one and has_many
