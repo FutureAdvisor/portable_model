@@ -94,7 +94,9 @@ module PortableModel
       raise ArgumentError.new('specified argument is not a hash') unless record_hash.is_a?(Hash)
 
       # Override any necessary attributes before importing.
-      record_hash.merge!(overridden_import_attrs)
+      overridden_import_attrs.each do |attr, overridden_value|
+        record_hash[attr] = overridden_value.is_a?(Proc) ? overridden_value.call(record_hash) : overridden_value
+      end
 
       if (columns_hash.include?(inheritance_column) &&
           (record_type_name = record_hash[inheritance_column.to_s]) &&
@@ -196,23 +198,23 @@ module PortableModel
     end
 
     def included_association_keys
-      @included_association_keys ||= Set.new
+      @included_association_keys ||= superclass.include?(PortableModel) ? superclass.included_association_keys.dup : Set.new
     end
 
     def excluded_export_attrs
-      @excluded_export_attrs ||= Set.new
+      @excluded_export_attrs ||= superclass.include?(PortableModel) ? superclass.excluded_export_attrs.dup : Set.new
     end
 
     def overridden_export_attrs
-      @overridden_export_attrs ||= {}
+      @overridden_export_attrs ||= superclass.include?(PortableModel) ? superclass.overridden_export_attrs.dup : {}
     end
 
     def overridden_import_attrs
-      @overridden_import_attrs ||= {}
+      @overridden_import_attrs ||= superclass.include?(PortableModel) ? superclass.overridden_import_attrs.dup : {}
     end
 
     def order_associations
-      @order_associations ||= []
+      @order_associations ||= superclass.include?(PortableModel) ? superclass.order_associations.dup : []
     end
 
   protected
