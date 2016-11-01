@@ -110,9 +110,17 @@ module PortableModel
           # If the hash had already been imported during the current session,
           # use the result of that previous import.
           record = imported_records[record_hash.object_id]
+          transaction do
+            if record
+              # Before we reuse the result of the previous import, check if that result is missing a foreign key association
+              association_foreign_keys = record.class.reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)
+              record_hash.select { |key, value| association_foreign_keys.include?(key) }.each do |key, value|
+                # Update the record if the association id exists in record_hash, and the record's existing association id is nil
+                record.update_attribute(key, value) if value && record[key].nil?
+              end
 
-          unless record
-            transaction do
+              record.save(!options.fetch(:skip_validations, false))
+            else
               # First split out the attributes that correspond to portable
               # associations.
               assoc_attrs = portable_associations.inject({}) do |hash, assoc_name|
@@ -136,13 +144,14 @@ module PortableModel
 
             end
 
-            imported_records[record_hash.object_id] = record
           end
 
+          imported_records[record_hash.object_id] = record
           record
         end
       end
     end
+
 
     # Export a record from a YAML file.
     #
