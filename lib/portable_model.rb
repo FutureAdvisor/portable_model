@@ -16,6 +16,10 @@ module PortableModel
   #
   attr_accessor :importing_record
 
+  def currently_importing?
+    !!Thread.current[:imported_records]
+  end
+
   # Export the record to a hash.
   #
   def export_to_hash
