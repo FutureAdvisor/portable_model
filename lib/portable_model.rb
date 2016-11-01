@@ -110,17 +110,28 @@ module PortableModel
           # If the hash had already been imported during the current session,
           # use the result of that previous import.
           record = imported_records[record_hash.object_id]
-          transaction do
-            if record
-              # Before we reuse the result of the previous import, check if that result is missing a foreign key association
-              association_foreign_keys = record.class.reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)
-              record_hash.select { |key, value| association_foreign_keys.include?(key) }.each do |key, value|
-                # Update the record if the association id exists in record_hash, and the record's existing association id is nil
-                record.update_attribute(key, value) if value && record[key].nil?
+
+          if record
+            # Before we reuse the result of the previous import, check if that result is missing a foreign key association
+            association_foreign_key_list = record.class.reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)
+            association_foreign_keys = record_hash.select do |key, value|
+              association_foreign_key_list.include?(key) && value && record[key].nil?
+            end
+
+            unless association_foreign_keys.empty?
+              transaction do
+                association_foreign_keys.each do |key, value|
+                  # Update the record if the association id exists in record_hash, and the record's existing association id is nil
+                  record.update_attribute(key, value)
+                end
+
+                record.save(!options.fetch(:skip_validations, false))
               end
 
-              record.save(!options.fetch(:skip_validations, false))
-            else
+              imported_records[record_hash.object_id] = record
+            end
+          else
+            transaction do
               # First split out the attributes that correspond to portable
               # associations.
               assoc_attrs = portable_associations.inject({}) do |hash, assoc_name|
@@ -141,12 +152,11 @@ module PortableModel
               assoc_attrs.each do |assoc_name, assoc_value|
                 record.import_into_association(assoc_name, assoc_value, options)
               end
-
             end
 
+            imported_records[record_hash.object_id] = record
           end
 
-          imported_records[record_hash.object_id] = record
           record
         end
       end
