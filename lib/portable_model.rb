@@ -284,13 +284,13 @@ module PortableModel
       # Determine the foreign keys that the record owns
       association_foreign_key_list = record.class.reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)
 
-      # Select the foreign keys in record_hash that belong to record, are not nil, and that record does not already possess
-      association_foreign_keys = record_hash.select do |key, value|
-        association_foreign_key_list.include?(key) && value && record[key].nil?
+      # Update the foreign keys to any associations that haven't been set yet.
+      association_foreign_keys = record_hash.reject do |key, value|
+        !association_foreign_key_list.include?(key) || value.nil? || !record[key].nil?
       end
 
       unless association_foreign_keys.empty?
-        record.attributes = Hash[association_foreign_keys]
+        record.attributes = association_foreign_keys
         record.save(!options.fetch(:skip_validations, false))
       end
     end
