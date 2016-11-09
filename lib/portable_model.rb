@@ -10,12 +10,14 @@ module PortableModel
     base.extend(ClassMethods)
   end
 
-  # Introduce a virtual attribute that is used to indicate whether the record
-  # is currently being imported. It can be read to skip callbacks and
-  # validations that shouldn't be run when a record is being imported.
+  # This virtual attribute is now deprecated in favor of #currently_importing?
   #
   attr_accessor :importing_record
 
+  # Check whether the record is currently being imported. Callers can use this
+  # for determining when to skip callbacks and validations that shouldn't be
+  # run when a record is being imported.
+  #
   def currently_importing?
     !!Thread.current[:imported_records]
   end
