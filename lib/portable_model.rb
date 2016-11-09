@@ -112,24 +112,7 @@ module PortableModel
           record = imported_records[record_hash.object_id]
 
           if record
-            # Before we reuse the result of the previous import, check if that result is missing a foreign key association
-            association_foreign_key_list = record.class.reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)
-            association_foreign_keys = record_hash.select do |key, value|
-              association_foreign_key_list.include?(key) && value && record[key].nil?
-            end
-
-            unless association_foreign_keys.empty?
-              transaction do
-                association_foreign_keys.each do |key, value|
-                  # Update the record if the association id exists in record_hash, and the record's existing association id is nil
-                  record.update_attribute(key, value)
-                end
-
-                record.save(!options.fetch(:skip_validations, false))
-              end
-
-              imported_records[record_hash.object_id] = record
-            end
+            update_record_associations(record, record_hash, options)
           else
             transaction do
               # First split out the attributes that correspond to portable
@@ -292,6 +275,23 @@ module PortableModel
         yield(Thread.current[storage_identifier])
       ensure
         Thread.current[storage_identifier] = nil if is_new_session
+      end
+    end
+
+    # Update a record's foreign key associations with the respective keys from record_hash.
+    #
+    def update_record_associations(record, record_hash, options)
+      # Determine the foreign keys that the record owns
+      association_foreign_key_list = record.class.reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)
+
+      # Select the foreign keys in record_hash that belong to record, are not nil, and that record does not already possess
+      association_foreign_keys = record_hash.select do |key, value|
+        association_foreign_key_list.include?(key) && value && record[key].nil?
+      end
+
+      unless association_foreign_keys.empty?
+        record.attributes = Hash[association_foreign_keys]
+        record.save(!options.fetch(:skip_validations, false))        
       end
     end
 
