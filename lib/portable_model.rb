@@ -115,7 +115,9 @@ module PortableModel
           # use the result of that previous import.
           record = imported_records[record_hash.object_id]
 
-          unless record
+          if record
+            update_record_associations(record, record_hash, options)
+          else
             transaction do
               # First split out the attributes that correspond to portable
               # associations.
@@ -277,6 +279,23 @@ module PortableModel
         yield(Thread.current[storage_identifier])
       ensure
         Thread.current[storage_identifier] = nil if is_new_session
+      end
+    end
+
+    # Update a record's foreign key associations with the respective keys from record_hash.
+    #
+    def update_record_associations(record, record_hash, options)
+      # Determine the foreign keys that the record owns
+      association_foreign_key_list = record.class.reflect_on_all_associations(:belongs_to).map(&:association_foreign_key)
+
+      # Update the foreign keys to any associations that haven't been set yet.
+      association_foreign_keys = record_hash.reject do |key, value|
+        !association_foreign_key_list.include?(key) || value.nil? || !record[key].nil?
+      end
+
+      unless association_foreign_keys.empty?
+        record.attributes = association_foreign_keys
+        record.save(!options.fetch(:skip_validations, false))
       end
     end
 
