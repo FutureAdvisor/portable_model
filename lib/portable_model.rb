@@ -135,6 +135,7 @@ module PortableModel
               assoc_attrs.each do |assoc_name, assoc_value|
                 record.import_into_association(assoc_name, assoc_value, options)
               end
+
             end
 
             imported_records[record_hash.object_id] = record
@@ -144,7 +145,6 @@ module PortableModel
         end
       end
     end
-
 
     # Export a record from a YAML file.
     #
@@ -291,7 +291,7 @@ module PortableModel
 
       unless association_foreign_keys.empty?
         record.attributes = Hash[association_foreign_keys]
-        record.save(!options.fetch(:skip_validations, false))        
+        record.save(!options.fetch(:skip_validations, false))
       end
     end
 
