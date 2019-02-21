@@ -3,5 +3,5 @@
 Include +PortableModel+ in any +ActiveRecord+ model to enable exporting and
 importing the model's records.
 
-Author::  Clyde Law (mailto:claw@alum.mit.edu)
+Author::  FutureAdvisor
 License:: Released under the MIT license

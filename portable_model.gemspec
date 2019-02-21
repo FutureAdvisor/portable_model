@@ -5,9 +5,9 @@ require "portable_model/version"
 Gem::Specification.new do |s|
   s.name        = "portable_model"
   s.version     = PortableModel::VERSION
-  s.authors     = ["Clyde Law"]
-  s.email       = ["claw@alum.mit.edu"]
-  s.homepage    = %q{http://github.com/Umofomia/portable_model}
+  s.authors     = ["FutureAdvisor"]
+  s.email       = ["core.platform@futureadvisor.com"]
+  s.homepage    = %q{http://github.com/FutureAdvisor/portable_model}
   s.summary     = %q{Enables exporting and importing an ActiveRecord model's records.}
   s.description = %q{Enables exporting and importing an ActiveRecord model's records.}
 
